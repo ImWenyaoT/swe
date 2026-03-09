@@ -155,8 +155,8 @@ class Agent:
 
         Returns ``(None, '')`` when no action is found.
         """
-        action_match = re.search(r"Action:\s*(.+)", text)
-        input_match = re.search(r"Action Input:\s*(.*)", text, re.DOTALL)
+        action_match = re.search(r"^Action:\s*(.+)", text, re.IGNORECASE | re.MULTILINE)
+        input_match = re.search(r"^Action Input:\s*(.*)", text, re.IGNORECASE | re.MULTILINE)
         if not action_match:
             return None, ""
         action = action_match.group(1).strip()

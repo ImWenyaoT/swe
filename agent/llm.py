@@ -31,6 +31,11 @@ class OpenAILLM:
     ) -> None:
         self.model = model
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        if not self.api_key:
+            raise ValueError(
+                "No OpenAI API key provided. Pass api_key= or set the "
+                "OPENAI_API_KEY environment variable."
+            )
         self.base_url = base_url
         self.max_tokens = max_tokens
         self.temperature = temperature

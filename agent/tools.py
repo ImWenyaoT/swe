@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import math
+import operator
 import datetime
 from dataclasses import dataclass, field
 from typing import Callable
@@ -34,14 +36,82 @@ class Tool:
 # ---------------------------------------------------------------------------
 
 def _calculator(expression: str) -> str:
-    """Evaluate a safe mathematical expression."""
-    # Allow only safe mathematical operations
-    allowed_names = {
-        k: v for k, v in math.__dict__.items() if not k.startswith("_")
+    """Evaluate a mathematical expression using a safe AST-based evaluator."""
+
+    # Allowlist of safe unary/binary operators
+    _UNARY_OPS: dict[type, Callable] = {
+        ast.UAdd: operator.pos,
+        ast.USub: operator.neg,
     }
-    allowed_names.update({"abs": abs, "round": round, "pow": pow})
+    _BIN_OPS: dict[type, Callable] = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+    }
+    # Numeric constants resolvable as bare names
+    _SAFE_CONSTS: dict[str, float] = {
+        "pi": math.pi,
+        "e": math.e,
+        "tau": math.tau,
+        "inf": math.inf,
+        "nan": math.nan,
+    }
+    # Allowlist of callable math functions (no attribute access)
+    _SAFE_FUNCS: dict[str, Callable] = {
+        name: getattr(math, name)  # type: ignore[assignment]
+        for name in dir(math)
+        if not name.startswith("_") and callable(getattr(math, name))
+    }
+    _SAFE_FUNCS.update({
+        "abs": abs,
+        "round": round,
+        "pow": pow,
+    })
+
+    def _eval(node: ast.AST) -> float:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.Constant):
+            if not isinstance(node.value, (int, float)):
+                raise ValueError(f"Unsupported constant type: {type(node.value)}")
+            return node.value
+        if isinstance(node, ast.Name):
+            if node.id in _SAFE_CONSTS:
+                return _SAFE_CONSTS[node.id]
+            if node.id in _SAFE_FUNCS:
+                raise ValueError(
+                    f"'{node.id}' is a function; call it with parentheses, e.g. {node.id}(...)."
+                )
+            raise ValueError(f"Unknown name: '{node.id}'")
+        if isinstance(node, ast.UnaryOp):
+            op_fn = _UNARY_OPS.get(type(node.op))
+            if op_fn is None:
+                raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
+            return op_fn(_eval(node.operand))
+        if isinstance(node, ast.BinOp):
+            op_fn = _BIN_OPS.get(type(node.op))
+            if op_fn is None:
+                raise ValueError(f"Unsupported operator: {type(node.op).__name__}")
+            return op_fn(_eval(node.left), _eval(node.right))
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name):
+                raise ValueError("Only simple function calls are allowed (no attribute access).")
+            func = _SAFE_FUNCS.get(node.func.id)
+            if func is None:
+                raise ValueError(f"Unknown function: '{node.func.id}'")
+            if node.keywords:
+                raise ValueError("Keyword arguments are not supported.")
+            args = [_eval(a) for a in node.args]
+            return func(*args)  # type: ignore[operator]
+        raise ValueError(f"Unsupported expression type: {type(node).__name__}")
+
     try:
-        result = eval(expression, {"__builtins__": {}}, allowed_names)  # noqa: S307
+        tree = ast.parse(expression.strip(), mode="eval")
+        result = _eval(tree)
         return str(result)
     except Exception as exc:
         return f"Error: {exc}"
@@ -95,5 +165,5 @@ search_tool = Tool(
         "Input should be a concise search query."
     ),
     func=_search,
-    examples=["Input: 'capital of France'  → Output: 'Paris'"],
+    examples=[],
 )

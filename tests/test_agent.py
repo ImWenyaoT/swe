@@ -61,6 +61,15 @@ class TestCalculatorTool:
         result = calculator_tool("import os")
         assert result.startswith("Error")
 
+    def test_attribute_traversal_rejected(self):
+        """Ensure MRO/subclass escape attempts are blocked."""
+        result = calculator_tool("().__class__.__mro__[1].__subclasses__()")
+        assert result.startswith("Error")
+
+    def test_string_literal_rejected(self):
+        result = calculator_tool("'hello'")
+        assert result.startswith("Error")
+
     def test_division_by_zero_returns_error(self):
         result = calculator_tool("1 / 0")
         assert result.startswith("Error")
@@ -122,6 +131,19 @@ class TestAgentParsing:
         action, action_input = Agent._parse_action(text)
         assert action == "calculator"
         assert action_input == "2 + 2"
+
+    def test_parse_action_case_insensitive(self):
+        """LLMs sometimes emit 'action:' in lowercase."""
+        text = "thought: I need to calculate\naction: calculator\naction input: 2 + 2"
+        action, action_input = Agent._parse_action(text)
+        assert action == "calculator"
+        assert action_input == "2 + 2"
+
+    def test_parse_action_input_stops_at_newline(self):
+        """Action Input should not bleed into subsequent lines."""
+        text = "Action: calculator\nAction Input: 3 + 3\nObservation: 6"
+        _, action_input = Agent._parse_action(text)
+        assert action_input == "3 + 3"
 
     def test_parse_action_missing(self):
         action, action_input = Agent._parse_action("No action here")
@@ -202,3 +224,40 @@ class TestAgentRun:
         agent.run("Is verbose on?")
         captured = capsys.readouterr()
         assert "[iter 1]" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# LLM tests
+# ---------------------------------------------------------------------------
+
+
+class TestOpenAILLM:
+    def test_raises_without_api_key(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        from agent.llm import OpenAILLM
+
+        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+            OpenAILLM(api_key=None)
+
+    def test_accepts_explicit_api_key(self, monkeypatch):
+        """Constructor should not raise when an explicit key is provided."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        from agent.llm import OpenAILLM
+
+        try:
+            llm = OpenAILLM(api_key="sk-test-key")
+            assert llm.api_key == "sk-test-key"
+        except ImportError:
+            pytest.skip("openai package not installed")
+
+
+# ---------------------------------------------------------------------------
+# Search tool tests
+# ---------------------------------------------------------------------------
+
+
+class TestSearchTool:
+    def test_no_examples_in_schema(self):
+        from agent.tools import search_tool
+
+        assert "Example" not in search_tool.schema()
